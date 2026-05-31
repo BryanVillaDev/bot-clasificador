@@ -42,7 +42,7 @@ log = logging.getLogger("web")
 ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(ROOT / "templates"))
 
-app = FastAPI(title="BotCasa Panel", docs_url=None, redoc_url=None)
+app = FastAPI(title="Bot Casita", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
 
@@ -98,7 +98,7 @@ async def root(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_get(request: Request):
-    return TEMPLATES.TemplateResponse("login.html", {"request": request, "error": None})
+    return TEMPLATES.TemplateResponse(request, "login.html", {"error": None})
 
 
 @app.post("/login", response_class=HTMLResponse)
@@ -111,8 +111,9 @@ async def login_post(
         u = (await s.execute(select(User).where(User.username == username))).scalar_one_or_none()
     if u is None or not verify_password(password, u.password_hash):
         return TEMPLATES.TemplateResponse(
+            request,
             "login.html",
-            {"request": request, "error": "Usuario o contrasena invalidos"},
+            {"error": "Usuario o contrasena invalidos"},
             status_code=400,
         )
     resp = RedirectResponse("/dashboard", status_code=303)
@@ -139,8 +140,9 @@ async def dashboard(request: Request, user: User = Depends(current_user)):
             await s.execute(select(Alert).order_by(desc(Alert.id)).limit(5))
         ).scalars().all()
     return TEMPLATES.TemplateResponse(
+        request,
         "dashboard.html",
-        {"request": request, "user": user, "jobs": rows, "alerts": alerts},
+        {"user": user, "jobs": rows, "alerts": alerts},
     )
 
 
@@ -148,8 +150,9 @@ async def dashboard(request: Request, user: User = Depends(current_user)):
 async def jobs_new_get(request: Request, user: User = Depends(current_user)):
     ani_available = await ani_ping()
     return TEMPLATES.TemplateResponse(
+        request,
         "new_job.html",
-        {"request": request, "user": user, "ani_available": ani_available},
+        {"user": user, "ani_available": ani_available},
     )
 
 
@@ -180,9 +183,9 @@ async def jobs_new_range(
 ):
     if range_max <= range_min or range_min < 0:
         return TEMPLATES.TemplateResponse(
+            request,
             "new_job.html",
             {
-                "request": request,
                 "user": user,
                 "ani_available": True,
                 "error": "Rango invalido (min < max y min >= 0).",
@@ -191,9 +194,9 @@ async def jobs_new_range(
         )
     if limit < 1 or limit > 10_000:
         return TEMPLATES.TemplateResponse(
+            request,
             "new_job.html",
             {
-                "request": request,
                 "user": user,
                 "ani_available": True,
                 "error": "El limite debe estar entre 1 y 10000.",
@@ -206,9 +209,9 @@ async def jobs_new_range(
         cedulas = await fetch_range(range_min, range_max, limit, offset=0)
     if not cedulas:
         return TEMPLATES.TemplateResponse(
+            request,
             "new_job.html",
             {
-                "request": request,
                 "user": user,
                 "ani_available": True,
                 "error": "No se encontraron cedulas en el rango.",
@@ -243,8 +246,9 @@ async def jobs_new_post(
     parsed = _parse_cedulas(cedulas)
     if not parsed:
         return TEMPLATES.TemplateResponse(
+            request,
             "new_job.html",
-            {"request": request, "user": user, "error": "Pega al menos una cedula valida"},
+            {"user": user, "error": "Pega al menos una cedula valida"},
             status_code=400,
         )
     async with SessionLocal() as s:
@@ -270,7 +274,7 @@ async def job_view(request: Request, job_id: int, user: User = Depends(current_u
             )
         ).scalars().all()
     return TEMPLATES.TemplateResponse(
-        "job.html", {"request": request, "user": user, "job": job, "items": items}
+        request, "job.html", {"user": user, "job": job, "items": items}
     )
 
 
