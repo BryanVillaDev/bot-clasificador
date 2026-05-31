@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - BotCasa{% endblock %}
+{% block content %}
+<div class="row">
+  <div class="card grow">
+    <h2>Tus lotes</h2>
+    {% if not jobs %}
+      <p class="muted">No has creado ningun lote todavia. <a href="/jobs/new">Crear uno</a>.</p>
+    {% else %}
+      <table class="data">
+        <thead>
+          <tr><th>ID</th><th>Nombre</th><th>Estado</th><th>Progreso</th><th>OK</th><th>Fallos</th><th>Creado</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for j in jobs %}
+          <tr>
+            <td>#{{ j.id }}</td>
+            <td>{{ j.name }}</td>
+            <td><span class="status status-{{ j.status }}">{{ j.status }}</span></td>
+            <td>
+              <div class="bar"><div class="bar-fill" style="width: {{ j.progress_pct }}%"></div></div>
+              <small>{{ j.done + j.failed }}/{{ j.total }} ({{ j.progress_pct }}%)</small>
+            </td>
+            <td>{{ j.done }}</td>
+            <td>{{ j.failed }}</td>
+            <td><small>{{ j.created_at.strftime("%Y-%m-%d %H:%M") }}</small></td>
+            <td><a href="/jobs/{{ j.id }}">ver</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+</div>
+
+{% if alerts %}
+<div class="row">
+  <div class="card grow">
+    <h2>Alertas recientes</h2>
+    <ul class="alerts">
+      {% for a in alerts %}
+        <li class="alert alert-{{ a.level }}">
+          <small>{{ a.created_at.strftime("%Y-%m-%d %H:%M") }}</small>
+          {{ a.message }}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

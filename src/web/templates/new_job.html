@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Nuevo lote - BotCasa{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Crear lote de clasificacion</h2>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <div class="tabs">
+    <button type="button" class="tab active" data-tab="manual">Pegar cedulas</button>
+    {% if ani_available %}
+    <button type="button" class="tab" data-tab="range">Por rango (ANI)</button>
+    {% else %}
+    <button type="button" class="tab disabled" disabled title="DB ani no disponible">Por rango (no disponible)</button>
+    {% endif %}
+  </div>
+
+  <div class="tab-content" data-tab="manual">
+    <form method="post" action="/jobs/new">
+      <label>Nombre (opcional)
+        <input type="text" name="name" placeholder="ej. ronda 2 abril">
+      </label>
+      <label>Tipo de documento
+        <select name="tipo">
+          <option value="01" selected>CC (01)</option>
+          <option value="02">CE (02)</option>
+          <option value="03">PA (03)</option>
+          <option value="04">TI (04)</option>
+        </select>
+      </label>
+      <label>Cedulas (una por linea; comas o ; tambien sirven)
+        <textarea name="cedulas" rows="10" required placeholder="79672391&#10;79667000&#10;79667015"></textarea>
+      </label>
+      <button type="submit">Encolar</button>
+    </form>
+  </div>
+
+  {% if ani_available %}
+  <div class="tab-content" data-tab="range" style="display:none">
+    <p class="muted">
+      Busca cedulas reales en la tabla <code>ani.ani_fin</code> (columna <code>ANINuip</code>).
+      Define rango y cuantas tomar.
+    </p>
+    <form method="post" action="/jobs/new-range">
+      <label>Nombre (opcional)
+        <input type="text" name="name" placeholder="ej. tramo 79M-80M">
+      </label>
+      <label>Tipo de documento
+        <select name="tipo">
+          <option value="01" selected>CC (01)</option>
+          <option value="02">CE (02)</option>
+          <option value="03">PA (03)</option>
+          <option value="04">TI (04)</option>
+        </select>
+      </label>
+      <div class="row tight">
+        <label class="grow">Cedula minima
+          <input type="number" name="range_min" id="range_min" value="79000000" min="0" required>
+        </label>
+        <label class="grow">Cedula maxima
+          <input type="number" name="range_max" id="range_max" value="80000000" min="0" required>
+        </label>
+      </div>
+      <div class="row tight">
+        <label class="grow">Cuantas tomar (limite)
+          <input type="number" name="limit" id="limit" value="50" min="1" max="10000" required>
+        </label>
+        <label class="grow">Modo
+          <select name="mode">
+            <option value="asc" selected>ascendente (primeras N del rango)</option>
+            <option value="random">aleatorio (muestreo)</option>
+          </select>
+        </label>
+      </div>
+      <p>
+        <button type="button" id="btn-preview">Contar cedulas en el rango</button>
+        <span id="preview" class="muted"></span>
+      </p>
+      <button type="submit">Encolar</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+(function(){
+  // tabs
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(t => t.addEventListener('click', function(){
+    if (this.disabled || this.classList.contains('disabled')) return;
+    tabs.forEach(x => x.classList.remove('active'));
+    this.classList.add('active');
+    const tab = this.dataset.tab;
+    document.querySelectorAll('.tab-content').forEach(c => {
+      c.style.display = (c.dataset.tab === tab) ? '' : 'none';
+    });
+  }));
+
+  // preview
+  const btn = document.getElementById('btn-preview');
+  if (btn) {
+    btn.addEventListener('click', async function(){
+      const min = document.getElementById('range_min').value;
+      const max = document.getElementById('range_max').value;
+      const out = document.getElementById('preview');
+      out.textContent = 'Consultando...';
+      try {
+        const r = await fetch('/api/ani/count?min=' + encodeURIComponent(min) + '&max=' + encodeURIComponent(max));
+        if (!r.ok) { out.textContent = 'Error: ' + r.status; return; }
+        const j = await r.json();
+        out.textContent = j.count.toLocaleString() + ' cedulas en el rango';
+      } catch (e) {
+        out.textContent = 'Error: ' + e.message;
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

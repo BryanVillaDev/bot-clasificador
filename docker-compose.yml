@@ -1,0 +1,9 @@
+services:
+  botcasa:
+    build: .
+    image: botcasa:latest
+    container_name: botcasa
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"

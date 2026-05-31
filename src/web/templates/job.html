@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Lote #{{ job.id }} - BotCasa{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Lote #{{ job.id }} <small class="muted">{{ job.name }}</small></h2>
+  <p>
+    Estado: <span id="job-status" class="status status-{{ job.status }}">{{ job.status }}</span>
+    <a class="btn-link" href="/jobs/{{ job.id }}/results.csv">descargar CSV</a>
+    <a class="btn-link" href="/jobs/{{ job.id }}/results.json">JSON</a>
+  </p>
+  <div class="bar big"><div id="bar-fill" class="bar-fill" style="width: {{ job.progress_pct }}%"></div></div>
+  <p><span id="done">{{ job.done }}</span>/<span id="total">{{ job.total }}</span> procesadas ({{ job.failed }} fallos) - <span id="pct">{{ job.progress_pct }}%</span></p>
+</div>
+
+<div class="card">
+  <h3>Resultados</h3>
+  <table class="data" id="items">
+    <thead><tr><th>Cedula</th><th>Estado</th><th>Bucket</th><th>StepId</th><th>Mensaje / Error</th></tr></thead>
+    <tbody>
+      {% for it in items %}
+        <tr id="item-{{ it.id }}" data-cedula="{{ it.cedula }}">
+          <td>{{ it.cedula }}</td>
+          <td class="col-status"><span class="status status-{{ it.status }}">{{ it.status }}</span></td>
+          <td class="col-bucket">{% if it.bucket %}<span class="bucket bucket-{{ it.bucket }}">{{ it.bucket }}</span>{% endif %}</td>
+          <td class="col-step">{{ it.envelope_step or "" }}</td>
+          <td class="col-msg">{{ it.error or it.message or "" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(proto + '://' + location.host + '/ws/jobs/{{ job.id }}');
+  const done = document.getElementById('done');
+  const total = document.getElementById('total');
+  const pct = document.getElementById('pct');
+  const bar = document.getElementById('bar-fill');
+  const jobStatus = document.getElementById('job-status');
+
+  function findRowByCedula(cedula) {
+    const rows = document.querySelectorAll('#items tbody tr');
+    for (const r of rows) {
+      if (r.getAttribute('data-cedula') === cedula) return r;
+    }
+    return null;
+  }
+
+  ws.onmessage = function(ev) {
+    let m;
+    try { m = JSON.parse(ev.data); } catch(e) { return; }
+    if (m.type === 'ping') return;
+    if (m.type === 'snapshot' || m.type === 'item_done') {
+      if (m.done !== undefined) done.textContent = m.done + (m.failed||0 ? '+' + m.failed : '');
+      if (m.total !== undefined) total.textContent = m.total;
+      if (m.progress_pct !== undefined) {
+        pct.textContent = m.progress_pct + '%';
+        bar.style.width = m.progress_pct + '%';
+      }
+      if (m.status || m.job_status) {
+        const s = m.job_status || m.status;
+        jobStatus.textContent = s;
+        jobStatus.className = 'status status-' + s;
+      }
+    }
+    if (m.type === 'item_done') {
+      const row = findRowByCedula(m.cedula);
+      if (row) {
+        row.querySelector('.col-status').innerHTML = '<span class="status status-' + m.status + '">' + m.status + '</span>';
+        if (m.bucket) row.querySelector('.col-bucket').innerHTML = '<span class="bucket bucket-' + m.bucket + '">' + m.bucket + '</span>';
+        if (m.error) row.querySelector('.col-msg').textContent = m.error.slice(0, 200);
+      }
+    }
+    if (m.type === 'item_start') {
+      const row = findRowByCedula(m.cedula);
+      if (row) row.querySelector('.col-status').innerHTML = '<span class="status status-running">running</span>';
+    }
+  };
+  ws.onclose = function() {
+    // intento simple de reconectar
+    setTimeout(function() { location.reload(); }, 3000);
+  };
+})();
+</script>
+{% endblock %}

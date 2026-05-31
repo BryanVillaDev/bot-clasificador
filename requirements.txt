@@ -1,0 +1,23 @@
+httpx[http2]>=0.27
+cryptography>=43
+pyjwt>=2.9
+joserfc>=1.0
+
+# web
+fastapi>=0.115
+uvicorn[standard]>=0.32
+jinja2>=3.1
+python-multipart>=0.0.20
+passlib[bcrypt]>=1.7
+itsdangerous>=2.2
+websockets>=13
+
+# db (MariaDB async)
+sqlalchemy>=2.0
+asyncmy>=0.2
+
+# telegram
+aiogram>=3.10
+
+# config
+python-dotenv>=1.0

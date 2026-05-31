@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Ingresar - BotCasa{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>Ingresar</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/login">
+    <label>Usuario
+      <input type="text" name="username" required autofocus>
+    </label>
+    <label>Contrasena
+      <input type="password" name="password" required>
+    </label>
+    <button type="submit">Entrar</button>
+  </form>
+</div>
+{% endblock %}

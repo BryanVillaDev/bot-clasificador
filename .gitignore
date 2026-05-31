@@ -1,0 +1,43 @@
+# Credenciales y secretos
+.env
+.env.local
+.env.*.local
+
+# Material sensible de capturas (HARs con tokens, sessionIds, cedulas reales,
+# claves privadas RSA del browser, bundles JS)
+capture/
+*.har
+checkclient.har
+checkclient2.har
+iniciaflow.har
+tma_load.har
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs / runtime
+*.log
+/tmp/
+srv.log
