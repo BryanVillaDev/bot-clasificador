@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 
+import bcrypt
 from fastapi import HTTPException, Request, status
 from itsdangerous import BadSignature, URLSafeSerializer
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,19 +13,20 @@ from .config import SECRET_KEY
 from .db import SessionLocal, User
 
 log = logging.getLogger("auth")
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _signer = URLSafeSerializer(SECRET_KEY, salt="session-v1")
 
 COOKIE_NAME = "bc_session"
 
 
 def hash_password(p: str) -> str:
-    return _pwd.hash(p)
+    """Bcrypt directo, sin passlib (que pelea con bcrypt 4.x)."""
+    return bcrypt.hashpw(p.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def verify_password(p: str, h: str) -> bool:
+    """Bcrypt directo. checkpw soporta hashes generados por passlib + bcrypt."""
     try:
-        return _pwd.verify(p, h)
+        return bcrypt.checkpw(p.encode("utf-8"), h.encode("utf-8"))
     except Exception as e:
         log.error("verify_password raised: %s", e)
         return False
