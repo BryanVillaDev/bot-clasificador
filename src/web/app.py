@@ -107,15 +107,28 @@ async def login_post(
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ):
+    log.info("login attempt: user=%r pw_len=%d", username, len(password))
     async with SessionLocal() as s:
         u = (await s.execute(select(User).where(User.username == username))).scalar_one_or_none()
-    if u is None or not verify_password(password, u.password_hash):
+    if u is None:
+        log.warning("login FAIL: user not found: %r", username)
         return TEMPLATES.TemplateResponse(
             request,
             "login.html",
             {"error": "Usuario o contrasena invalidos"},
             status_code=400,
         )
+    ok = verify_password(password, u.password_hash)
+    log.info("login verify: user=%r id=%d ok=%s hash_prefix=%s", username, u.id, ok, u.password_hash[:10])
+    if not ok:
+        log.warning("login FAIL: bad password for user=%r id=%d", username, u.id)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "login.html",
+            {"error": "Usuario o contrasena invalidos"},
+            status_code=400,
+        )
+    log.info("login OK: user=%r id=%d -> setting cookie + 303", username, u.id)
     resp = RedirectResponse("/dashboard", status_code=303)
     resp.set_cookie(COOKIE_NAME, make_session_cookie(u.id), httponly=True, samesite="lax")
     return resp

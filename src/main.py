@@ -30,7 +30,9 @@ async def main() -> None:
         port=PORT,
         log_level="info",
         loop="asyncio",
-        access_log=False,
+        access_log=True,
+        proxy_headers=True,
+        forwarded_allow_ips="*",
     )
     server = uvicorn.Server(config)
     tasks = [asyncio.create_task(server.serve(), name="uvicorn")]
