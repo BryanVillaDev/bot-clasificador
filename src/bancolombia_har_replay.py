@@ -50,36 +50,36 @@ MOBILE_UA = (
 
 
 def extract_cookies_from_har(har_path: Path) -> dict[str, dict[str, str]]:
-    """Lee un HAR y agrupa las cookies por dominio.
-
-    Retorna {dominio: {cookie_name: cookie_value}}.
+    """Lee cookies del HAR desde 3 lugares:
+       1. request.cookies (HAR 1.2 estandar)
+       2. request.headers[Cookie] (lo que envia el browser)
+       3. response.headers[Set-Cookie] (lo que setea el server)
     """
     har = json.loads(har_path.read_text(encoding="utf-8"))
     by_domain: dict[str, dict[str, str]] = {}
-
-    # Primero, capturamos cookies enviadas en requests (request.cookies en HAR)
-    # y las que vienen en Set-Cookie de responses
     for entry in har["log"]["entries"]:
-        url = entry["request"]["url"]
-        host = urlparse(url).hostname or ""
-        # Cookies enviadas en este request (el browser ya las tenia)
+        host = urlparse(entry["request"]["url"]).hostname or ""
+        d = by_domain.setdefault(host, {})
         for c in entry["request"].get("cookies") or []:
             name = c.get("name")
             val = c.get("value")
             if name and val is not None:
-                by_domain.setdefault(host, {})[name] = val
-        # Cookies seteadas por el server en este response
+                d[name] = val
+        for h in entry["request"].get("headers", []):
+            if h["name"].lower() == "cookie":
+                for pair in h["value"].split(";"):
+                    pair = pair.strip()
+                    if "=" in pair:
+                        name, val = pair.split("=", 1)
+                        d[name.strip()] = val.strip()
         for h in entry["response"].get("headers", []):
             if h["name"].lower() != "set-cookie":
                 continue
-            # parse el primer "name=value" antes del ;
-            raw = h["value"]
-            head = raw.split(";", 1)[0]
+            head = h["value"].split(";", 1)[0]
             if "=" not in head:
                 continue
             name, val = head.split("=", 1)
-            by_domain.setdefault(host, {})[name.strip()] = val.strip()
-
+            d[name.strip()] = val.strip()
     return by_domain
 
 

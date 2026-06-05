@@ -39,15 +39,34 @@ DOC_TYPE_CC = "TIPDOC_FS001"
 
 
 def extract_cookies_from_har(har_path: Path) -> dict[str, dict[str, str]]:
+    """Lee cookies del HAR desde 3 lugares:
+       1. request.cookies (HAR 1.2 estandar)
+       2. request.headers[Cookie] (lo que envia el browser)
+       3. response.headers[Set-Cookie] (lo que setea el server)
+    """
     har = json.loads(har_path.read_text(encoding="utf-8"))
     by_domain: dict[str, dict[str, str]] = {}
     for entry in har["log"]["entries"]:
         host = urlparse(entry["request"]["url"]).hostname or ""
+        d = by_domain.setdefault(host, {})
+
+        # 1) request.cookies array
         for c in entry["request"].get("cookies") or []:
             name = c.get("name")
             val = c.get("value")
             if name and val is not None:
-                by_domain.setdefault(host, {})[name] = val
+                d[name] = val
+
+        # 2) Cookie header del request (esto es lo que Chrome envia siempre)
+        for h in entry["request"].get("headers", []):
+            if h["name"].lower() == "cookie":
+                for pair in h["value"].split(";"):
+                    pair = pair.strip()
+                    if "=" in pair:
+                        name, val = pair.split("=", 1)
+                        d[name.strip()] = val.strip()
+
+        # 3) Set-Cookie del response
         for h in entry["response"].get("headers", []):
             if h["name"].lower() != "set-cookie":
                 continue
@@ -55,7 +74,7 @@ def extract_cookies_from_har(har_path: Path) -> dict[str, dict[str, str]]:
             if "=" not in head:
                 continue
             name, val = head.split("=", 1)
-            by_domain.setdefault(host, {})[name.strip()] = val.strip()
+            d[name.strip()] = val.strip()
     return by_domain
 
 
