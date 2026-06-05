@@ -21,3 +21,7 @@ aiogram>=3.10
 
 # config
 python-dotenv>=1.0
+
+# bot Bancolombia: browser real para pasar Imperva
+playwright>=1.48
+tf-playwright-stealth>=1.2
