@@ -84,6 +84,7 @@ BUCKET_BLOQUEADO = "BLOQUEADO"
 BUCKET_SIN_USUARIO = "SIN_USUARIO"
 BUCKET_ERROR_BANCO = "ERROR_BANCO"
 BUCKET_ERROR_RED = "ERROR_RED"
+BUCKET_BLOQUEADO_WAF = "BLOQUEADO_WAF"   # Imperva nos bloqueo (no es la cedula, es el bot)
 
 
 @dataclass
@@ -373,10 +374,14 @@ async def classify(cedula: str, clave: str, *, client_ip: str | None = None) -> 
 
         # OAuth fallido -> mapear codigo a bucket
         if r_oauth.status_code >= 400 or "accessToken" not in oauth_body.get("data", {}):
-            err = oauth_body.get("errors") or oauth_body.get("data") or oauth_body
-            err_text = json.dumps(err, ensure_ascii=False)[:500]
+            err_text = r_oauth.text[:1500]
             err_lower = err_text.lower()
-            if "bloqueada" in err_lower or "bloqueado" in err_lower or "intentos" in err_lower:
+            # 1) Bloqueo de Imperva / WAF (HTML, no es respuesta de Bancolombia)
+            ct = r_oauth.headers.get("content-type", "")
+            if ("text/html" in ct or "incapsula" in err_lower or "imperva" in err_lower
+                    or "access denied" in err_lower or "noindex, nofollow" in err_lower):
+                bucket = BUCKET_BLOQUEADO_WAF
+            elif "bloqueada" in err_lower or "bloqueado" in err_lower or "intentos" in err_lower:
                 bucket = BUCKET_BLOQUEADO
             elif "no encontr" in err_lower or "no existe" in err_lower:
                 bucket = BUCKET_SIN_USUARIO
@@ -385,8 +390,8 @@ async def classify(cedula: str, clave: str, *, client_ip: str | None = None) -> 
             return Result(
                 cedula=cedula, clave_present=bool(clave), bucket=bucket,
                 oauth_status=r_oauth.status_code,
-                error_message=err_text,
-                raw_oauth=oauth_body,
+                error_message=err_text[:500],
+                raw_oauth=oauth_body if "accessToken" not in oauth_body.get("data", {}) else None,
                 duration_s=time.time() - t0,
             )
 
