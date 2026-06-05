@@ -276,7 +276,10 @@ async def classify_async(
                     page, cedula, clave, raw_responses, started, t0, take_screenshot
                 )
             finally:
-                await browser.close()
+                if browser is not None:
+                    await browser.close()
+                else:
+                    await context.close()
     else:
         browser, context = keep_browser
         page = await context.new_page()
