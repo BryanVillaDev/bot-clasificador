@@ -106,23 +106,69 @@ def classify_text(text: str) -> tuple[str, str]:
 # --- Driver del browser ---------------------------------------------------
 
 
-async def _setup_context(p, headless: bool, proxy: str | None) -> tuple[Browser, BrowserContext]:
-    launch_args: dict[str, Any] = {"headless": headless}
-    if proxy:
-        launch_args["proxy"] = {"server": proxy}
-    browser = await p.chromium.launch(**launch_args)
-    context = await browser.new_context(
-        viewport={"width": 1280, "height": 800},
-        locale="es-CO",
-        timezone_id="America/Bogota",
-        user_agent=DEFAULT_USER_AGENT,
-        extra_http_headers={
+USER_DATA_DIR = ROOT / "capture" / "bancolombia" / "browser_profile"
+
+
+async def _setup_context(
+    p,
+    headless: bool,
+    proxy: str | None,
+    use_system_chrome: bool = True,
+) -> tuple[Browser | None, BrowserContext]:
+    """Lanza un browser persistente lo mas parecido a Chrome real.
+
+    - channel='chrome' usa el Chrome INSTALADO en el sistema (no el Chromium
+      bundled de Playwright, que tiene huellas distintas).
+    - launch_persistent_context guarda cookies y storage entre runs -> Imperva
+      ve una "sesion" coherente.
+    - args desactivan los flags que delatan automation.
+    """
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    launch_args: dict[str, Any] = {
+        "headless": headless,
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=Translate,OptimizationHints",
+        ],
+        "ignore_default_args": ["--enable-automation"],
+        "viewport": {"width": 1366, "height": 768},
+        "locale": "es-CO",
+        "timezone_id": "America/Bogota",
+        "user_agent": DEFAULT_USER_AGENT,
+        "extra_http_headers": {
             "Accept-Language": "es-CO,es;q=0.9,en;q=0.8",
         },
+    }
+    if proxy:
+        launch_args["proxy"] = {"server": proxy}
+    if use_system_chrome:
+        launch_args["channel"] = "chrome"
+
+    context = await p.chromium.launch_persistent_context(
+        str(USER_DATA_DIR), **launch_args
     )
     stealth = Stealth()
     await stealth.apply_stealth_async(context)
-    return browser, context
+
+    # Sacar webdriver y otras señales que Imperva mira
+    await context.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['es-CO','es','en-US','en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
+        window.chrome = window.chrome || { runtime: {} };
+        const orig = navigator.permissions && navigator.permissions.query;
+        if (orig) {
+            navigator.permissions.query = (p) => p && p.name === 'notifications'
+                ? Promise.resolve({state: Notification.permission})
+                : orig.call(navigator.permissions, p);
+        }
+    """)
+
+    return None, context
 
 
 async def _fill_and_submit(page: Page, cedula: str, clave: str) -> None:
